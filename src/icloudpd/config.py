@@ -71,3 +71,5 @@ class GlobalConfig:
     watch_with_interval: int | None
     password_providers: Sequence[PasswordProvider]
     mfa_provider: MFAProvider
+    page_size: int
+    use_cursor_pagination: bool

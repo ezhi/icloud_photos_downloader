@@ -86,6 +86,8 @@ class PyiCloudService:
         client_id: str | None = None,
         with_family: bool = True,
         http_timeout: float = 30.0,
+        page_size: int = 100,
+        use_cursor_pagination: bool = False,
     ):
         self.apple_id = apple_id
         self.password_provider: Callable[[], str | None] = password_provider
@@ -95,6 +97,8 @@ class PyiCloudService:
         self.with_family = with_family
         self.http_timeout = http_timeout
         self.response_observer = response_observer
+        self.page_size = page_size
+        self.use_cursor_pagination = use_cursor_pagination
         self.observer_rules: Sequence[Rule] = []
 
         # set it when we get password
@@ -896,7 +900,7 @@ class PyiCloudService:
         """Gets the 'Photo' service."""
         if not self._photos:
             service_root = self._get_webservice_url("ckdatabasews")
-            self._photos = PhotosService(service_root, self.session, self.params)
+            self._photos = PhotosService(service_root, self.session, self.params, page_size=self.page_size, use_cursor_pagination=self.use_cursor_pagination)
         return self._photos
 
     def __unicode__(self) -> str:

@@ -277,12 +277,16 @@ class PhotoLibrary:
         session: Session,
         zone_id: Dict[str, Any],
         library_type: str,
+        page_size: int = 100,
+        use_cursor_pagination: bool = False,
     ):
         self.service_endpoint = service_endpoint
         self.params = params
         self.session = session
         self.zone_id = zone_id
         self.library_type = library_type
+        self.page_size = page_size
+        self.use_cursor_pagination = use_cursor_pagination
 
         url = f"{self.service_endpoint}/records/query?{urlencode(self.params)}"
         json_data = json.dumps(
@@ -309,6 +313,8 @@ class PhotoLibrary:
                 self.service_endpoint,
                 name,
                 zone_id=self.zone_id,
+                page_size=self.page_size,
+                use_cursor_pagination=self.use_cursor_pagination,
                 **props,
             )  # type: ignore[arg-type] # dynamically builing params
             for (name, props) in self.SMART_FOLDERS.items()
@@ -343,6 +349,8 @@ class PhotoLibrary:
                 folder_obj_type,
                 query_filter,
                 zone_id=self.zone_id,
+                page_size=self.page_size,
+                use_cursor_pagination=self.use_cursor_pagination,
             )
             albums[folder_name] = album
 
@@ -375,6 +383,8 @@ class PhotoLibrary:
             self.WHOLE_COLLECTION["obj_type"],
             query_filter=self.WHOLE_COLLECTION["query_filter"],
             zone_id=self.zone_id,
+            page_size=self.page_size,
+            use_cursor_pagination=self.use_cursor_pagination,
         )
 
     @property
@@ -388,6 +398,8 @@ class PhotoLibrary:
             self.RECENTLY_DELETED["obj_type"],
             query_filter=self.RECENTLY_DELETED["query_filter"],
             zone_id=self.zone_id,
+            page_size=self.page_size,
+            use_cursor_pagination=self.use_cursor_pagination,
         )
 
 
@@ -397,7 +409,7 @@ class PhotosService(PhotoLibrary):
     This also acts as a way to access the user's primary library.
     """
 
-    def __init__(self, service_root: str, session: PyiCloudSession, params: Dict[str, Any]):
+    def __init__(self, service_root: str, session: PyiCloudSession, params: Dict[str, Any], page_size: int = 100, use_cursor_pagination: bool = False):
         self.session = session
         self.params = dict(params)
         self._service_root = service_root
@@ -410,7 +422,7 @@ class PhotosService(PhotoLibrary):
         # Initialize as primary library
         service_endpoint = self.get_service_endpoint("private")
         zone_id = {"zoneName": "PrimarySync"}
-        super().__init__(service_endpoint, self.params, self.session, zone_id, "private")
+        super().__init__(service_endpoint, self.params, self.session, zone_id, "private", page_size=page_size, use_cursor_pagination=use_cursor_pagination)
 
         # TODO: Does syncToken ever change?
         # self.params.update({
@@ -451,6 +463,8 @@ class PhotosService(PhotoLibrary):
                         self.session,
                         zone_id=zone["zoneID"],
                         library_type=library_type,
+                        page_size=self.page_size,
+                        use_cursor_pagination=self.use_cursor_pagination,
                     )
                     # obj_type='CPLAssetByAssetDateWithoutHiddenOrDeleted',
                     # list_type="CPLAssetAndMasterByAssetDateWithoutHiddenOrDeleted",
@@ -476,6 +490,7 @@ class PhotoAlbum:
         query_filter: Sequence[Dict[str, Any]] | None = None,
         page_size: int = 100,
         zone_id: Dict[str, Any] | None = None,
+        use_cursor_pagination: bool = False,
     ):
         self.name = name
         self.params = params
@@ -486,6 +501,7 @@ class PhotoAlbum:
         self.offset = 0
         self.query_filter = query_filter
         self.page_size = page_size
+        self.use_cursor_pagination = use_cursor_pagination
 
         if zone_id:
             self._zone_id: Dict[str, Any] = zone_id
@@ -522,19 +538,14 @@ class PhotoAlbum:
 
     @property
     def photos(self) -> Generator["PhotoAsset", Any, None]:
+        if self.use_cursor_pagination:
+            yield from self._photos_cursor()
+        else:
+            yield from self._photos_offset()
+
+    def _photos_offset(self) -> Generator["PhotoAsset", Any, None]:
         while True:
             request = self.photos_request()
-
-            #            url = ('%s/records/query?' % self.service_endpoint) + \
-            #                urlencode(self.service.params)
-            #            request = self.service.session.post(
-            #                url,
-            #                data=json.dumps(self._list_query_gen(
-            #                    offset, self.list_type, self.direction,
-            #                    self.query_filter)),
-            #                headers={'Content-type': 'text/plain'}
-            #            )
-
             response = request.json()
 
             asset_records = {}
@@ -553,6 +564,41 @@ class PhotoAlbum:
                     yield PhotoAsset(master_record, asset_records[record_name])
                     self.increment_offset(1)
             else:
+                break
+
+    def _photos_cursor(self) -> Generator["PhotoAsset", Any, None]:
+        continuation_marker: str | None = None
+        while True:
+            url = f"{self.service_endpoint}/records/query?{urlencode(self.params)}"
+            request = self.session.post(
+                url,
+                data=json.dumps(
+                    self._list_query_gen_cursor(
+                        continuation_marker, self.list_type, self.query_filter
+                    )
+                ),
+                headers={"Content-type": "text/plain"},
+            )
+            response = request.json()
+
+            asset_records = {}
+            master_records = []
+            for rec in response["records"]:
+                if rec["recordType"] == "CPLAsset":
+                    master_id = rec["fields"]["masterRef"]["value"]["recordName"]
+                    asset_records[master_id] = rec
+                elif rec["recordType"] == "CPLMaster":
+                    master_records.append(rec)
+
+            if not master_records:
+                break
+
+            for master_record in master_records:
+                record_name = master_record["recordName"]
+                yield PhotoAsset(master_record, asset_records[record_name])
+
+            continuation_marker = response.get("continuationMarker")
+            if not continuation_marker:
                 break
 
     def increment_offset(self, value: int) -> None:
@@ -641,9 +687,7 @@ class PhotoAlbum:
                 "resSidecarFingerprint",
                 "resSidecarRes",
                 "itemType",
-                "dataClassType",
                 "filenameEnc",
-                "originalOrientation",
                 "resOriginalWidth",
                 "resOriginalHeight",
                 "resOriginalFileType",
@@ -660,50 +704,128 @@ class PhotoAlbum:
                 "resOriginalVidComplFingerprint",
                 "resOriginalVidComplRes",
                 "isDeleted",
-                "isExpunged",
-                "dateExpunged",
-                "remappedRef",
                 "recordName",
                 "recordType",
                 "recordChangeTag",
                 "masterRef",
-                "adjustmentRenderType",
                 "assetDate",
                 "addedDate",
                 "isFavorite",
                 "isHidden",
-                "orientation",
-                "duration",
-                "assetSubtype",
                 "assetSubtypeV2",
-                "assetHDRType",
-                "burstFlags",
-                "burstFlagsExt",
-                "burstId",
                 "captionEnc",
                 "locationEnc",
-                "locationV2Enc",
-                "locationLatitude",
-                "locationLongitude",
-                "adjustmentType",
                 "timeZoneOffset",
-                "vidComplDurValue",
-                "vidComplDurScale",
-                "vidComplDispValue",
-                "vidComplDispScale",
                 "keywordsEnc",
                 "extendedDescEnc",
-                "adjustedMediaMetaDataEnc",
                 "adjustmentSimpleDataEnc",
-                "vidComplVisibilityState",
-                "customRenderedValue",
-                "containerId",
-                "itemId",
-                "position",
-                "isKeyAsset",
             ],
             "zoneID": self._zone_id,
         }
+
+        if query_filter:
+            query["query"]["filterBy"].extend(query_filter)
+
+        return query
+
+    def _list_query_gen_cursor(
+        self,
+        continuation_marker: str | None,
+        list_type: str,
+        query_filter: Sequence[Dict[str, None]] | None = None,
+    ) -> Dict[str, Any]:
+        query: Dict[str, Any] = {
+            "query": {
+                "filterBy": [
+                    {
+                        "fieldName": "direction",
+                        "fieldValue": {"type": "STRING", "value": "ASCENDING"},
+                        "comparator": "EQUALS",
+                    },
+                ],
+                "recordType": list_type,
+            },
+            "resultsLimit": self.page_size * 2,
+            "desiredKeys": [
+                "resJPEGFullWidth",
+                "resJPEGFullHeight",
+                "resJPEGFullFileType",
+                "resJPEGFullFingerprint",
+                "resJPEGFullRes",
+                "resJPEGLargeWidth",
+                "resJPEGLargeHeight",
+                "resJPEGLargeFileType",
+                "resJPEGLargeFingerprint",
+                "resJPEGLargeRes",
+                "resJPEGMedWidth",
+                "resJPEGMedHeight",
+                "resJPEGMedFileType",
+                "resJPEGMedFingerprint",
+                "resJPEGMedRes",
+                "resJPEGThumbWidth",
+                "resJPEGThumbHeight",
+                "resJPEGThumbFileType",
+                "resJPEGThumbFingerprint",
+                "resJPEGThumbRes",
+                "resVidFullWidth",
+                "resVidFullHeight",
+                "resVidFullFileType",
+                "resVidFullFingerprint",
+                "resVidFullRes",
+                "resVidMedWidth",
+                "resVidMedHeight",
+                "resVidMedFileType",
+                "resVidMedFingerprint",
+                "resVidMedRes",
+                "resVidSmallWidth",
+                "resVidSmallHeight",
+                "resVidSmallFileType",
+                "resVidSmallFingerprint",
+                "resVidSmallRes",
+                "resSidecarWidth",
+                "resSidecarHeight",
+                "resSidecarFileType",
+                "resSidecarFingerprint",
+                "resSidecarRes",
+                "itemType",
+                "filenameEnc",
+                "resOriginalWidth",
+                "resOriginalHeight",
+                "resOriginalFileType",
+                "resOriginalFingerprint",
+                "resOriginalRes",
+                "resOriginalAltWidth",
+                "resOriginalAltHeight",
+                "resOriginalAltFileType",
+                "resOriginalAltFingerprint",
+                "resOriginalAltRes",
+                "resOriginalVidComplWidth",
+                "resOriginalVidComplHeight",
+                "resOriginalVidComplFileType",
+                "resOriginalVidComplFingerprint",
+                "resOriginalVidComplRes",
+                "isDeleted",
+                "recordName",
+                "recordType",
+                "recordChangeTag",
+                "masterRef",
+                "assetDate",
+                "addedDate",
+                "isFavorite",
+                "isHidden",
+                "assetSubtypeV2",
+                "captionEnc",
+                "locationEnc",
+                "timeZoneOffset",
+                "keywordsEnc",
+                "extendedDescEnc",
+                "adjustmentSimpleDataEnc",
+            ],
+            "zoneID": self._zone_id,
+        }
+
+        if continuation_marker:
+            query["continuationMarker"] = continuation_marker
 
         if query_filter:
             query["query"]["filterBy"].extend(query_filter)

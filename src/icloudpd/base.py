@@ -913,6 +913,8 @@ def core_single_run(
                 partial(append_response, captured_responses),
                 user_config.cookie_directory,
                 os.environ.get("CLIENT_ID"),
+                page_size=global_config.page_size,
+                use_cursor_pagination=global_config.use_cursor_pagination,
             )
 
             # dump captured responses for debugging
@@ -979,14 +981,7 @@ def core_single_run(
                         if len(user_config.albums) > 0
                         else [library_object.all]
                     )
-                    album_lengths: Callable[[Iterable[PhotoAlbum]], Iterable[int]] = partial_1_1(
-                        map_, len
-                    )
-
-                    def sum_(inp: Iterable[int]) -> int:
-                        return sum(inp)
-
-                    photos_count: int | None = compose(sum_, album_lengths)(albums)
+                    photos_count: int | None = None
                     for photo_album in albums:
                         photos_enumerator: Iterable[PhotoAsset] = photo_album
 

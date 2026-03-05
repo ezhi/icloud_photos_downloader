@@ -90,6 +90,8 @@ class CliTestCase(TestCase):
                         PasswordProvider.CONSOLE,
                     ],
                     mfa_provider=MFAProvider.CONSOLE,
+                    page_size=100,
+                    use_cursor_pagination=False,
                 ),
                 [],
             ),
@@ -114,6 +116,8 @@ class CliTestCase(TestCase):
                         PasswordProvider.CONSOLE,
                     ],
                     mfa_provider=MFAProvider.WEBUI,
+                    page_size=100,
+                    use_cursor_pagination=False,
                 ),
                 [],
             ),
@@ -143,6 +147,8 @@ class CliTestCase(TestCase):
                     watch_with_interval=None,
                     password_providers=[PasswordProvider.WEBUI, PasswordProvider.CONSOLE],
                     mfa_provider=MFAProvider.CONSOLE,
+                    page_size=100,
+                    use_cursor_pagination=False,
                 ),
                 [],
             ),
@@ -167,6 +173,8 @@ class CliTestCase(TestCase):
                         PasswordProvider.CONSOLE,
                     ],
                     mfa_provider=MFAProvider.CONSOLE,
+                    page_size=100,
+                    use_cursor_pagination=False,
                 ),
                 [],
             ),
@@ -193,6 +201,8 @@ class CliTestCase(TestCase):
                         PasswordProvider.CONSOLE,
                     ],
                     mfa_provider=MFAProvider.CONSOLE,
+                    page_size=100,
+                    use_cursor_pagination=False,
                 ),
                 [
                     UserConfig(
@@ -309,6 +319,8 @@ class CliTestCase(TestCase):
                         PasswordProvider.CONSOLE,
                     ],
                     mfa_provider=MFAProvider.CONSOLE,
+                    page_size=100,
+                    use_cursor_pagination=False,
                 ),
                 [
                     UserConfig(

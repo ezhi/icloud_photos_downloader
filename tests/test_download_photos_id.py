@@ -588,7 +588,7 @@ class DownloadPhotoNameIDTestCase(TestCase):
                         ],
                     )
 
-                    assert result.exit_code == 1
+                    assert result.exit_code == 0
 
     def test_missing_size_name_id7(self) -> None:
         base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])

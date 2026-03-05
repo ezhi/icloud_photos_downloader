@@ -358,6 +358,17 @@ def add_global_options(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
         default="console",
         type=lower,
     )
+    cloned.add_argument(
+        "--page-size",
+        help="Number of photos to request per API page. Default: %(default)s",
+        type=int,
+        default=100,
+    )
+    cloned.add_argument(
+        "--use-cursor-pagination",
+        help="Use cursor-based pagination instead of offset-based pagination",
+        action="store_true",
+    )
     return cloned
 
 
@@ -528,6 +539,8 @@ def parse(args: Sequence[str]) -> Tuple[GlobalConfig, Sequence[UserConfig]]:
                 )
             ),
             mfa_provider=MFAProvider(global_ns.mfa_provider),
+            page_size=global_ns.page_size,
+            use_cursor_pagination=global_ns.use_cursor_pagination,
         ),
         user_nses,
     )

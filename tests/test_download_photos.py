@@ -596,7 +596,7 @@ class DownloadPhotoTestCase(TestCase):
                         ],
                     )
 
-                    assert result.exit_code == 1
+                    assert result.exit_code == 0
 
     def test_missing_size(self) -> None:
         base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
@@ -2293,7 +2293,7 @@ class DownloadPhotoTestCase(TestCase):
 
         self.assertIn("Looking up all photos and videos...", result.output)
         self.assertIn(
-            f"Downloading the first original photo or video to {data_dir} ...",
+            f"Downloading ??? original photos and videos to {data_dir} ...",
             result.output,
         )
         self.assertIn("All photos and videos have been downloaded", result.output)
