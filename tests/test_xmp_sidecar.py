@@ -9,6 +9,7 @@ from icloudpd.xmp_sidecar import XMPMetadata, build_metadata
 class BuildXMPMetadata(TestCase):
     def test_build_metadata(self) -> None:
         assetRecordStub: Dict[str, Dict[str, Any]] = {
+            "recordName": "F2A23C38-0020-42FE-A273-2923ADE3CAED",
             "fields": {
                 "captionEnc": {"value": "VGl0bGUgSGVyZQ==", "type": "ENCRYPTED_BYTES"},
                 "extendedDescEnc": {"value": "Q2FwdGlvbiBIZXJl", "type": "ENCRYPTED_BYTES"},
@@ -38,6 +39,7 @@ class BuildXMPMetadata(TestCase):
             metadata,
             XMPMetadata(
                 XMPToolkit="icloudpd " + version_info.version + "+" + version_info.commit_sha,
+                UUID="F2A23C38-0020-42FE-A273-2923ADE3CAED",
                 Title="Title Here",
                 Description="Caption Here",
                 Orientation=8,

@@ -19,6 +19,7 @@ exif_tool = None
 
 class XMPMetadata(NamedTuple):
     XMPToolkit: str
+    UUID: str | None
     Title: str | None
     Description: str | None
     Orientation: int | None
@@ -172,8 +173,11 @@ def build_metadata(asset_record: dict[str, Any]) -> XMPMetadata:
     ):
         rating = 5
 
+    uuid = asset_record.get("recordName")
+
     return XMPMetadata(
         XMPToolkit="icloudpd " + version_info.version + "+" + version_info.commit_sha,
+        UUID=uuid,
         Title=title,
         Description=description,
         Orientation=orientation,
@@ -244,6 +248,8 @@ def generate_xml(metadata: XMPMetadata) -> ElementTree.Element:
             "xmlns:xmp": "http://ns.adobe.com/xap/1.0/",
         },
     )
+    if metadata.UUID:
+        ElementTree.SubElement(description_dc, "dc:identifier").text = metadata.UUID
     if metadata.Title:
         ElementTree.SubElement(description_dc, "dc:title").text = metadata.Title
     if metadata.Description:
