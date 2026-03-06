@@ -990,6 +990,10 @@ class PhotoAsset:
     def id(self) -> str:
         return typing.cast(str, self._master_record["recordName"])
 
+    @property
+    def asset_id(self) -> str:
+        return typing.cast(str, self._asset_record["recordName"])
+
     def calculate_filename(self) -> str | None:
         """
         Calculate the raw filename for this asset from filenameEnc if present.

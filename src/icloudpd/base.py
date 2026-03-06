@@ -39,6 +39,7 @@ from tzlocal import get_localzone
 
 from foundation.core import compose, identity, map_, partial_1_1
 from icloudpd import download, exif_datetime
+from icloudpd.album_cache import build_album_membership_cached
 from icloudpd.authentication import authenticator
 from icloudpd.autodelete import autodelete_photos
 from icloudpd.config import GlobalConfig, UserConfig
@@ -420,7 +421,7 @@ def _process_all_users_once(
                     user_config.align_raw,
                 )
                 if user_config.directory is not None
-                else (lambda _s, _c, _p: False)
+                else (lambda _a, _s, _c, _p: False)
             )
 
             notificator = partial(
@@ -581,6 +582,7 @@ def download_builder(
     lp_filename_generator: Callable[[str], str],
     filename_builder: Callable[[PhotoAsset], str],
     raw_policy: RawTreatmentPolicy,
+    album_membership: Dict[str, List[Tuple[str, str | None]]],
     icloud: PyiCloudService,
     counter: Counter,
     photo: PhotoAsset,
@@ -732,7 +734,13 @@ def download_builder(
                     logger.info("Downloaded %s", truncated_path)
 
         if xmp_sidecar:
-            generate_xmp_file(logger, download_path, photo._asset_record, dry_run)
+            generate_xmp_file(
+                logger,
+                download_path,
+                photo._asset_record,
+                dry_run,
+                albums=album_membership.get(photo.asset_id),
+            )
 
     # Also download the live photo if present
     if not skip_live_photos:
@@ -885,7 +893,7 @@ def core_single_run(
         PasswordProvider, Tuple[Callable[[str], str | None], Callable[[str, str], None]]
     ],
     passer: Callable[[PhotoAsset], bool],
-    downloader: Callable[[PyiCloudService, Counter, PhotoAsset], bool],
+    downloader: Callable[[Dict[str, List[Tuple[str, str | None]]], PyiCloudService, Counter, PhotoAsset], bool],
     notificator: Callable[[], None],
     lp_filename_generator: Callable[[str], str],
 ) -> int:
@@ -980,8 +988,18 @@ def core_single_run(
 
                     logger.debug(f"Looking up all {photo_video_phrase}{album_phrase}...")
 
+                    need_albums_dict = user_config.xmp_sidecar or len(user_config.albums) > 0
+                    library_object.cache_dir = directory
+                    albums_dict = library_object.albums if need_albums_dict else {}
+
+                    album_membership: Dict[str, List[Tuple[str, str | None]]] = {}
+                    if user_config.xmp_sidecar:
+                        album_membership = build_album_membership_cached(
+                            albums_dict, directory, user_config.dry_run,
+                        )
+
                     albums: Iterable[PhotoAlbum] = (
-                        list(map_(library_object.albums.__getitem__, user_config.albums))
+                        list(map_(albums_dict.__getitem__, user_config.albums))
                         if len(user_config.albums) > 0
                         else [library_object.all]
                     )
@@ -1066,7 +1084,7 @@ def core_single_run(
                         now = datetime.datetime.now(get_localzone())
                         # photos_iterator = iter(photos_enumerator)
 
-                        download_photo = partial(downloader, icloud)
+                        download_photo = partial(downloader, album_membership, icloud)
 
                         for item in photos_bar:
                             try:

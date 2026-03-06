@@ -3,7 +3,7 @@ from typing import Any, Dict
 from unittest import TestCase
 
 from foundation import version_info
-from icloudpd.xmp_sidecar import XMPMetadata, build_metadata
+from icloudpd.xmp_sidecar import XMPMetadata, build_metadata, generate_xml
 
 
 class BuildXMPMetadata(TestCase):
@@ -57,6 +57,7 @@ class BuildXMPMetadata(TestCase):
                     "2018:07:30 11:44:10.176000+00:00", "%Y:%m:%d %H:%M:%S.%f%z"
                 ),
                 Rating=None,
+                Albums=None,
             ),
         )
 
@@ -120,3 +121,85 @@ class BuildXMPMetadata(TestCase):
             50.09418333333333,
             datetime.fromisoformat("2020-02-29T18:35:49"),
         )
+
+    def test_build_metadata_with_albums(self) -> None:
+        asset_record: Dict[str, Any] = {
+            "recordName": "TEST-UUID",
+            "fields": {
+                "assetDate": {"value": 1532951050176, "type": "TIMESTAMP"},
+                "isHidden": {"value": 0, "type": "INT64"},
+                "isDeleted": {"value": 0, "type": "INT64"},
+                "isFavorite": {"value": 0, "type": "INT64"},
+            },
+        }
+        albums = [("Vacation 2024", "ABC-123-UUID"), ("Family", "DEF-456-UUID")]
+        metadata = build_metadata(asset_record, albums=albums)
+        assert metadata.Albums == albums
+
+    def test_build_metadata_no_albums(self) -> None:
+        asset_record: Dict[str, Any] = {
+            "recordName": "TEST-UUID",
+            "fields": {
+                "assetDate": {"value": 1532951050176, "type": "TIMESTAMP"},
+                "isHidden": {"value": 0, "type": "INT64"},
+                "isDeleted": {"value": 0, "type": "INT64"},
+                "isFavorite": {"value": 0, "type": "INT64"},
+            },
+        }
+        metadata = build_metadata(asset_record)
+        assert metadata.Albums is None
+
+    def test_generate_xml_with_albums(self) -> None:
+        from xml.etree import ElementTree
+
+        metadata = XMPMetadata(
+            XMPToolkit="icloudpd test",
+            UUID="TEST-UUID",
+            Title=None,
+            Description=None,
+            Orientation=None,
+            Make=None,
+            DigitalSourceType=None,
+            Keywords=None,
+            GPSAltitude=None,
+            GPSLatitude=None,
+            GPSLongitude=None,
+            GPSSpeed=None,
+            GPSTimeStamp=None,
+            CreateDate=None,
+            Rating=None,
+            Albums=[("Vacation 2024", "ABC-123-UUID"), ("Family", None)],
+        )
+        xml_doc = generate_xml(metadata)
+        xml_str = ElementTree.tostring(xml_doc, encoding="unicode")
+
+        assert "<dc:relation>" in xml_str
+        assert "<rdf:Bag>" in xml_str
+        assert "<rdf:li>Vacation 2024 (ABC-123-UUID)</rdf:li>" in xml_str
+        assert "<rdf:li>Family</rdf:li>" in xml_str
+
+    def test_generate_xml_without_albums(self) -> None:
+        from xml.etree import ElementTree
+
+        metadata = XMPMetadata(
+            XMPToolkit="icloudpd test",
+            UUID="TEST-UUID",
+            Title=None,
+            Description=None,
+            Orientation=None,
+            Make=None,
+            DigitalSourceType=None,
+            Keywords=None,
+            GPSAltitude=None,
+            GPSLatitude=None,
+            GPSLongitude=None,
+            GPSSpeed=None,
+            GPSTimeStamp=None,
+            CreateDate=None,
+            Rating=None,
+            Albums=None,
+        )
+        xml_doc = generate_xml(metadata)
+        xml_str = ElementTree.tostring(xml_doc, encoding="unicode")
+
+        assert "dc:relation" not in xml_str

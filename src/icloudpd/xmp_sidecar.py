@@ -33,10 +33,15 @@ class XMPMetadata(NamedTuple):
     GPSTimeStamp: datetime | None
     CreateDate: datetime | None
     Rating: int | None
+    Albums: list[tuple[str, str | None]] | None
 
 
 def generate_xmp_file(
-    logger: logging.Logger, download_path: str, asset_record: dict[str, Any], dry_run: bool
+    logger: logging.Logger,
+    download_path: str,
+    asset_record: dict[str, Any],
+    dry_run: bool,
+    albums: list[tuple[str, str | None]] | None = None,
 ) -> None:
     sidecar_path: str = download_path + ".xmp"
     can_write_file: bool = True
@@ -69,7 +74,7 @@ def generate_xmp_file(
     # json.dump(asset_record["fields"],         open(download_path + ".ar.json", "w"),         indent=4,        default=str,        sort_keys=True)
 
     if can_write_file:
-        xmp_metadata: XMPMetadata = build_metadata(asset_record)
+        xmp_metadata: XMPMetadata = build_metadata(asset_record, albums=albums)
         xml_doc: ElementTree.Element = generate_xml(xmp_metadata)
         if not dry_run:
             # Write the XML to the file
@@ -77,7 +82,10 @@ def generate_xmp_file(
                 f.write(ElementTree.tostring(xml_doc, encoding="utf-8", xml_declaration=True))
 
 
-def build_metadata(asset_record: dict[str, Any]) -> XMPMetadata:
+def build_metadata(
+    asset_record: dict[str, Any],
+    albums: list[tuple[str, str | None]] | None = None,
+) -> XMPMetadata:
     """Build XMP metadata from asset record"""
 
     title = None
@@ -191,6 +199,7 @@ def build_metadata(asset_record: dict[str, Any]) -> XMPMetadata:
         GPSTimeStamp=gps_timestamp,
         CreateDate=create_date,
         Rating=rating,
+        Albums=albums,
     )
 
 
@@ -271,6 +280,15 @@ def generate_xml(metadata: XMPMetadata) -> ElementTree.Element:
         seq = ElementTree.SubElement(subject, "rdf:Seq")
         for keyword in metadata.Keywords:
             ElementTree.SubElement(seq, "rdf:li").text = keyword
+
+    if metadata.Albums:
+        relation = ElementTree.SubElement(description_dc, "dc:relation")
+        bag = ElementTree.SubElement(relation, "rdf:Bag")
+        for album_name, album_uuid in metadata.Albums:
+            if album_uuid:
+                ElementTree.SubElement(bag, "rdf:li").text = f"{album_name} ({album_uuid})"
+            else:
+                ElementTree.SubElement(bag, "rdf:li").text = album_name
 
     if metadata.GPSAltitude:
         ElementTree.SubElement(description_exif, "exif:GPSAltitude").text = str(
