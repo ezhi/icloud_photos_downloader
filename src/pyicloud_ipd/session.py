@@ -1,6 +1,7 @@
 import inspect
 import json
 import logging
+import time
 import typing
 from typing import Any, Callable, Dict, Mapping, NoReturn, Sequence
 
@@ -74,9 +75,14 @@ class PyiCloudSession(Session):
 
         if "timeout" not in kwargs and self.service.http_timeout is not None:
             kwargs["timeout"] = self.service.http_timeout
+        t0 = time.monotonic()
         response = throw_on_503(
             self.observe(handle_connection_error(super().request)(method, url, **kwargs))
         )
+        elapsed_ms = (time.monotonic() - t0) * 1000
+
+        from icloudpd.log_level import TRACE
+        request_logger.log(TRACE, "%s %s → %d (%.0fms)", method, url, response.status_code, elapsed_ms)
 
         content_type = response.headers.get("Content-Type", "").split(";")[0]
         json_mimetypes = ["application/json", "text/json"]

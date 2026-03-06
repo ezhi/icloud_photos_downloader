@@ -221,7 +221,11 @@ def create_logger(config: GlobalConfig) -> logging.Logger:
         # Need to make sure disabled is reset to the correct value,
         # because the logger instance is shared between tests.
         logger.disabled = False
-        if config.log_level == LogLevel.DEBUG:
+        if config.log_level == LogLevel.TRACE:
+            from icloudpd.log_level import TRACE
+            logger.setLevel(TRACE)
+            logging.getLogger().setLevel(TRACE)
+        elif config.log_level == LogLevel.DEBUG:
             logger.setLevel(logging.DEBUG)
         elif config.log_level == LogLevel.INFO:
             logger.setLevel(logging.INFO)

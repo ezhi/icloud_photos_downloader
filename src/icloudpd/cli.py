@@ -310,7 +310,7 @@ def add_global_options(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
     cloned.add_argument(
         "--log-level",
         help="Log level. Default: %(default)s",
-        choices=["debug", "info", "error"],
+        choices=["trace", "debug", "info", "error"],
         default="debug",
         type=lower,
     )
@@ -373,7 +373,9 @@ def add_global_options(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
 
 
 def log_level(inp: str) -> LogLevel:
-    if inp == "debug":
+    if inp == "trace":
+        return LogLevel.TRACE
+    elif inp == "debug":
         return LogLevel.DEBUG
     elif inp == "info":
         return LogLevel.INFO
