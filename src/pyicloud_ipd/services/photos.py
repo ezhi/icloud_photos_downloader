@@ -279,6 +279,7 @@ class PhotoLibrary:
         library_type: str,
         page_size: int = 100,
         use_cursor_pagination: bool = False,
+        cache_dir: str | None = None,
     ):
         self.service_endpoint = service_endpoint
         self.params = params
@@ -287,6 +288,7 @@ class PhotoLibrary:
         self.library_type = library_type
         self.page_size = page_size
         self.use_cursor_pagination = use_cursor_pagination
+        self.cache_dir = cache_dir
 
         url = f"{self.service_endpoint}/records/query?{urlencode(self.params)}"
         json_data = json.dumps(
@@ -320,18 +322,41 @@ class PhotoLibrary:
             for (name, props) in self.SMART_FOLDERS.items()
         }
 
-        for folder in self._fetch_folders():
-            # FIXME: Handle subfolders
+        self._process_folders(self._fetch_folders(), "", albums)
+
+        return albums
+
+    def _process_folders(
+        self,
+        folders: Sequence[Dict[str, Any]],
+        prefix: str,
+        albums: Dict[str, "PhotoAlbum"],
+    ) -> None:
+        for folder in folders:
             if folder["recordName"] in ("----Root-Folder----", "----Project-Root-Folder----") or (
                 folder["fields"].get("isDeleted") and folder["fields"]["isDeleted"]["value"]
             ):
                 continue
 
+            if "albumNameEnc" not in folder["fields"]:
+                continue
+
             folder_id = folder["recordName"]
-            folder_obj_type = f"CPLContainerRelationNotDeletedByAssetDate:{folder_id}"
             folder_name = base64.b64decode(folder["fields"]["albumNameEnc"]["value"]).decode(
                 "utf-8"
             )
+            full_name = f"{prefix}{folder_name}"
+
+            album_type = folder["fields"].get("albumType", {}).get("value", 0)
+            if album_type == 3:
+                # Folder container — recurse into children
+                folder_change_tag = folder.get("recordChangeTag")
+                children = self._fetch_subfolders_cached(folder_id, full_name, folder_change_tag)
+                self._process_folders(children, f"{full_name}/", albums)
+                continue
+
+            folder_obj_type = f"CPLContainerRelationNotDeletedByAssetDate:{folder_id}"
+            folder_change_tag = folder.get("recordChangeTag")
             query_filter = [
                 {
                     "fieldName": "parentId",
@@ -344,21 +369,90 @@ class PhotoLibrary:
                 self.params,
                 self.session,
                 self.service_endpoint,
-                folder_name,
+                full_name,
                 "CPLContainerRelationLiveByAssetDate",
                 folder_obj_type,
                 query_filter,
                 zone_id=self.zone_id,
                 page_size=self.page_size,
                 use_cursor_pagination=self.use_cursor_pagination,
+                uuid=folder_id,
+                record_change_tag=folder_change_tag,
             )
-            albums[folder_name] = album
-
-        return albums
+            albums[full_name] = album
 
     def _fetch_folders(self) -> Sequence[Dict[str, Any]]:
         if self.library_type == "shared":
             return []
+        return self._query_albums()
+
+    def _fetch_subfolders_cached(
+        self, folder_id: str, folder_path: str, record_change_tag: str | None
+    ) -> Sequence[Dict[str, Any]]:
+        if self.cache_dir and record_change_tag:
+            import os
+            meta_path = os.path.join(self.cache_dir, ".albums", folder_path, ".meta.json")
+            try:
+                with open(meta_path, "r") as f:
+                    cached = json.load(f)
+                if (
+                    isinstance(cached, dict)
+                    and cached.get("record_change_tag") == record_change_tag
+                    and "children" in cached
+                ):
+                    logger.debug("Folder cache hit: %s", folder_path)
+                    return typing.cast(Sequence[Dict[str, Any]], cached["children"])
+            except (OSError, json.JSONDecodeError, ValueError):
+                pass
+
+        children = self._fetch_subfolders(folder_id)
+
+        if self.cache_dir and record_change_tag:
+            import os
+            import tempfile
+            meta_path = os.path.join(self.cache_dir, ".albums", folder_path, ".meta.json")
+            try:
+                os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+                fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(meta_path), suffix=".tmp")
+                try:
+                    with os.fdopen(fd, "w") as f:
+                        json.dump({"record_change_tag": record_change_tag, "children": children}, f, indent=2)
+                    os.replace(tmp_path, meta_path)
+                    logger.debug("Folder cache saved: %s (%d children)", folder_path, len(children))
+                except Exception:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+            except Exception:
+                logger.warning("Failed to save folder cache for %s", folder_path, exc_info=True)
+
+        return children
+
+    def _fetch_subfolders(self, folder_id: str) -> Sequence[Dict[str, Any]]:
+        url = f"{self.service_endpoint}/records/query?{urlencode(self.params)}"
+        json_data = json.dumps(
+            {
+                "query": {
+                    "recordType": "CPLAlbumByPositionLive",
+                    "filterBy": [
+                        {
+                            "fieldName": "parentId",
+                            "comparator": "EQUALS",
+                            "fieldValue": {"type": "STRING", "value": folder_id},
+                        }
+                    ],
+                },
+                "zoneID": self.zone_id,
+            }
+        )
+
+        request = self.session.post(url, data=json_data, headers={"Content-type": "text/plain"})
+        response = request.json()
+
+        return typing.cast(Sequence[Dict[str, Any]], response["records"])
+
+    def _query_albums(self) -> Sequence[Dict[str, Any]]:
         url = f"{self.service_endpoint}/records/query?{urlencode(self.params)}"
         json_data = json.dumps(
             {
@@ -409,7 +503,7 @@ class PhotosService(PhotoLibrary):
     This also acts as a way to access the user's primary library.
     """
 
-    def __init__(self, service_root: str, session: PyiCloudSession, params: Dict[str, Any], page_size: int = 100, use_cursor_pagination: bool = False):
+    def __init__(self, service_root: str, session: PyiCloudSession, params: Dict[str, Any], page_size: int = 100, use_cursor_pagination: bool = False, cache_dir: str | None = None):
         self.session = session
         self.params = dict(params)
         self._service_root = service_root
@@ -422,7 +516,7 @@ class PhotosService(PhotoLibrary):
         # Initialize as primary library
         service_endpoint = self.get_service_endpoint("private")
         zone_id = {"zoneName": "PrimarySync"}
-        super().__init__(service_endpoint, self.params, self.session, zone_id, "private", page_size=page_size, use_cursor_pagination=use_cursor_pagination)
+        super().__init__(service_endpoint, self.params, self.session, zone_id, "private", page_size=page_size, use_cursor_pagination=use_cursor_pagination, cache_dir=cache_dir)
 
         # TODO: Does syncToken ever change?
         # self.params.update({
@@ -465,6 +559,7 @@ class PhotosService(PhotoLibrary):
                         library_type=library_type,
                         page_size=self.page_size,
                         use_cursor_pagination=self.use_cursor_pagination,
+                        cache_dir=self.cache_dir,
                     )
                     # obj_type='CPLAssetByAssetDateWithoutHiddenOrDeleted',
                     # list_type="CPLAssetAndMasterByAssetDateWithoutHiddenOrDeleted",
@@ -491,8 +586,12 @@ class PhotoAlbum:
         page_size: int = 100,
         zone_id: Dict[str, Any] | None = None,
         use_cursor_pagination: bool = False,
+        uuid: str | None = None,
+        record_change_tag: str | None = None,
     ):
         self.name = name
+        self.uuid = uuid
+        self.record_change_tag = record_change_tag
         self.params = params
         self.session = session
         self.service_endpoint = service_endpoint
