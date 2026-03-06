@@ -333,7 +333,26 @@ This is a list of all options available for the command line interface (CLI) of 
 
 :   Exports additional data as XMP sidecar files (default: don't export).
 
+    Sidecar files include EXIF metadata, GPS coordinates, keywords, the asset UUID (`dc:identifier`), and album membership (`dc:relation`). Album names and UUIDs are written as `dc:relation` entries so that album structure is preserved alongside downloaded files.
+
+    Album membership is cached in `.albums/<album_name>.json` files within the download directory to avoid re-fetching on incremental runs. The cache is invalidated automatically when an album's `record_change_tag` changes.
+
     ```{versionadded} 1.25.0
+    ```
+
+    ```{versionchanged} Unreleased
+    Album membership and asset UUID added to XMP sidecar output
+    ```
+
+(log-level-parameter)=
+`--log-level X`
+
+:   Sets the logging verbosity. Available levels: `trace`, `debug`, `info`, `error`. Default: `debug`.
+
+    The `trace` level logs all HTTP requests with method, URL, status code, and elapsed time. Useful for diagnosing API issues or slow responses.
+
+    ```{versionchanged} Unreleased
+    Added `trace` level
     ```
 
 (smtp-parameter)=

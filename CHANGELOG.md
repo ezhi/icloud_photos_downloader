@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- feat: add TRACE log level with HTTP request timing (`--log-level trace`)
+- feat: recursive subfolder traversal for iCloud album hierarchy
+- feat: album membership written to XMP sidecar files as `dc:relation`
+- feat: album membership cache (`.albums/<name>.json`) for faster incremental runs
+- feat: `PhotoAsset.asset_id` property exposing CPLAsset UUID for consistent identity
+
 ## 1.32.3 (2026-05-29)
 
 - fix: restore 2FA for Apple's updated auth flow (2026+) [#1322]https://github.com/icloud-photos-downloader/icloud_photos_downloader/issues/1322
