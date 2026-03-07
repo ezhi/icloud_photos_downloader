@@ -2,13 +2,18 @@ import json
 import logging
 import os
 import tempfile
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, NamedTuple, Set, Tuple
 
 from pyicloud_ipd.services.photos import PhotoAlbum
 
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = ".albums"
+
+
+class AlbumMembershipResult(NamedTuple):
+    membership: Dict[str, List[Tuple[str, str | None]]]
+    changed_asset_ids: Set[str]
 
 
 def _album_cache_path(directory: str, album_name: str) -> str:
@@ -51,8 +56,9 @@ def build_album_membership_cached(
     albums_dict: Dict[str, PhotoAlbum],
     directory: str,
     dry_run: bool,
-) -> Dict[str, List[Tuple[str, str | None]]]:
+) -> AlbumMembershipResult:
     album_membership: Dict[str, List[Tuple[str, str | None]]] = {}
+    changed_asset_ids: Set[str] = set()
     fetched_count = 0
 
     for album_name, album in albums_dict.items():
@@ -70,7 +76,10 @@ def build_album_membership_cached(
             logger.debug("Album cache hit: %s", album_name)
         else:
             logger.debug("Album cache miss: %s", album_name)
+            old_assets = set(cached_entry["assets"]) if cached_entry and "assets" in cached_entry else set()
             asset_ids = [photo.asset_id for photo in album]
+            new_assets = set(asset_ids)
+            changed_asset_ids |= old_assets ^ new_assets
             fetched_count += 1
             if not dry_run:
                 _save_album_cache(directory, album_name, {
@@ -90,4 +99,4 @@ def build_album_membership_cached(
     else:
         logger.debug("All album memberships served from cache")
 
-    return album_membership
+    return AlbumMembershipResult(membership=album_membership, changed_asset_ids=changed_asset_ids)

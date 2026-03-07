@@ -22,8 +22,9 @@ Entry point: `icloudpd` CLI -> `icloudpd.cli:cli()` -> `icloudpd.base.run_with_c
 | `src/icloudpd/cli.py` | Argument parsing, config construction |
 | `src/icloudpd/config.py` | GlobalConfig, UserConfig dataclasses |
 | `src/icloudpd/download.py` | File download with retries, resume, checksums |
-| `src/icloudpd/album_cache.py` | Album membership cache (`.albums/*.json`) |
-| `src/icloudpd/xmp_sidecar.py` | XMP sidecar generation (metadata, albums) |
+| `src/icloudpd/album_cache.py` | Album membership cache (`.albums/*.json`), change detection |
+| `src/icloudpd/asset_index.py` | Sharded asset_id → file paths index (`.index/`) |
+| `src/icloudpd/xmp_sidecar.py` | XMP sidecar generation and in-place album updates |
 | `src/icloudpd/authentication.py` | 2FA/2SA handling |
 | `src/icloudpd/autodelete.py` | Deletion strategies |
 | `src/icloudpd/log_level.py` | LogLevel enum, TRACE level (5) |
@@ -34,7 +35,7 @@ Entry point: `icloudpd` CLI -> `icloudpd.cli:cli()` -> `icloudpd.base.run_with_c
 ### Design patterns
 
 - Functional programming style (compose, curry, partial from `foundation.core`)
-- No database - sync state derived from filesystem (file existence + size)
+- No database - sync state derived from filesystem (file existence + size) plus asset index
 - Callback-based design for filename builders, password/MFA providers
 - Multi-user support (sequential processing, shared thread pool)
 
@@ -51,6 +52,9 @@ Entry point: `icloudpd` CLI -> `icloudpd.cli:cli()` -> `icloudpd.base.run_with_c
 - `PhotoAlbum.uuid` and `.record_change_tag` used for cache invalidation
 - Album membership cached in `.albums/<name>.json` to avoid re-fetching
 - Subfolder structure cached in `.albums/<path>/.meta.json`
+- Asset index (`.index/XX/<asset_id>.json`) maps asset UUIDs to relative file paths
+- Pre-loop pass detects album changes and updates XMP `dc:relation` for non-iterated photos
+- Autodelete removes asset index entries when files are deleted
 
 ## Development
 
@@ -78,7 +82,7 @@ Alternatively run tests directly:
 
 ### Testing
 
-- 24 test files in `tests/`
+- 25 test files in `tests/`
 - Uses vcrpy for HTTP recording, pytest, freezegun for time mocking
 - 100% test coverage expected for new code
 - Test cassettes contain cached iCloud API responses (never use private photos)

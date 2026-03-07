@@ -40,6 +40,7 @@ from tzlocal import get_localzone
 from foundation.core import compose, identity, map_, partial_1_1
 from icloudpd import download, exif_datetime
 from icloudpd.album_cache import build_album_membership_cached
+from icloudpd.asset_index import add_asset_path, load_asset_entry
 from icloudpd.authentication import authenticator
 from icloudpd.autodelete import autodelete_photos
 from icloudpd.config import GlobalConfig, UserConfig
@@ -53,7 +54,7 @@ from icloudpd.paths import local_download_path, remove_unicode_chars
 from icloudpd.server import serve_app
 from icloudpd.status import Status, StatusExchange
 from icloudpd.string_helpers import parse_timestamp_or_timedelta, truncate_middle
-from icloudpd.xmp_sidecar import generate_xmp_file
+from icloudpd.xmp_sidecar import generate_xmp_file, update_xmp_albums
 from pyicloud_ipd.asset_version import add_suffix_to_filename, calculate_version_filename
 from pyicloud_ipd.base import PyiCloudService
 from pyicloud_ipd.exceptions import (
@@ -688,6 +689,8 @@ def download_builder(
             if file_exists:
                 counter.increment()
                 logger.debug("%s already exists", truncate_middle(download_path, 96))
+                if xmp_sidecar:
+                    add_asset_path(directory, photo.asset_id, os.path.relpath(download_path, directory), dry_run)
 
         if not file_exists:
             counter.reset()
@@ -732,6 +735,8 @@ def download_builder(
                     if not dry_run:
                         download.set_utime(download_path, created_date)
                     logger.info("Downloaded %s", truncated_path)
+                    if xmp_sidecar:
+                        add_asset_path(directory, photo.asset_id, os.path.relpath(download_path, directory), dry_run)
 
         if xmp_sidecar:
             generate_xmp_file(
@@ -798,6 +803,8 @@ def download_builder(
                             lp_file_exists = os.path.isfile(lp_download_path)
                     if lp_file_exists:
                         logger.debug("%s already exists", truncate_middle(lp_download_path, 96))
+                        if xmp_sidecar:
+                            add_asset_path(directory, photo.asset_id, os.path.relpath(lp_download_path, directory), dry_run)
                 if not lp_file_exists:
                     truncated_path = truncate_middle(lp_download_path, 96)
                     logger.debug("Downloading %s...", truncated_path)
@@ -814,6 +821,8 @@ def download_builder(
                     success = download_result and success
                     if download_result:
                         logger.info("Downloaded %s", truncated_path)
+                        if xmp_sidecar:
+                            add_asset_path(directory, photo.asset_id, os.path.relpath(lp_download_path, directory), dry_run)
     return success
 
 
@@ -994,9 +1003,25 @@ def core_single_run(
 
                     album_membership: Dict[str, List[Tuple[str, str | None]]] = {}
                     if user_config.xmp_sidecar:
-                        album_membership = build_album_membership_cached(
+                        album_result = build_album_membership_cached(
                             albums_dict, directory, user_config.dry_run,
                         )
+                        album_membership = album_result.membership
+
+                        # Pre-loop: update XMP sidecars for assets whose album membership changed
+                        if not global_config.only_print_filenames and album_result.changed_asset_ids:
+                            updated = 0
+                            for asset_id in album_result.changed_asset_ids:
+                                paths = load_asset_entry(directory, asset_id)
+                                if not paths:
+                                    continue
+                                albums_for_asset = album_membership.get(asset_id)
+                                for rel_path in paths:
+                                    sidecar = os.path.join(directory, rel_path) + ".xmp"
+                                    if os.path.isfile(sidecar) and update_xmp_albums(logger, sidecar, albums_for_asset, user_config.dry_run):
+                                        updated += 1
+                            if updated:
+                                logger.info("Updated album metadata in %d sidecar(s)", updated)
 
                     albums: Iterable[PhotoAlbum] = (
                         list(map_(albums_dict.__getitem__, user_config.albums))

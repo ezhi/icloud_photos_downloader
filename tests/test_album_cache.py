@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock
 
-from icloudpd.album_cache import build_album_membership_cached, _load_album_cache, _save_album_cache, CACHE_DIR
+from icloudpd.album_cache import build_album_membership_cached, _load_album_cache, _save_album_cache, CACHE_DIR, AlbumMembershipResult
 
 
 def _make_album(name, uuid=None, record_change_tag=None, photos=None):
@@ -94,9 +94,12 @@ class TestBuildAlbumMembershipCached(unittest.TestCase):
             albums_dict = {"Vacation": album}
             result = build_album_membership_cached(albums_dict, d, dry_run=False)
 
-            self.assertIn("p1", result)
-            self.assertIn("p2", result)
-            self.assertEqual(result["p1"], [("Vacation", "abc")])
+            self.assertIsInstance(result, AlbumMembershipResult)
+            self.assertIn("p1", result.membership)
+            self.assertIn("p2", result.membership)
+            self.assertEqual(result.membership["p1"], [("Vacation", "abc")])
+            # No prior cache, so all assets are "changed"
+            self.assertEqual(result.changed_asset_ids, {"p1", "p2"})
 
             cache = _read_album_cache(d, "Vacation")
             self.assertEqual(cache["assets"], ["p1", "p2"])
@@ -115,8 +118,9 @@ class TestBuildAlbumMembershipCached(unittest.TestCase):
             result = build_album_membership_cached(albums_dict, d, dry_run=False)
 
             album.__iter__.assert_not_called()
-            self.assertEqual(result["p1"], [("Vacation", "abc")])
-            self.assertEqual(result["p2"], [("Vacation", "abc")])
+            self.assertEqual(result.membership["p1"], [("Vacation", "abc")])
+            self.assertEqual(result.membership["p2"], [("Vacation", "abc")])
+            self.assertEqual(result.changed_asset_ids, set())
 
     def test_build_membership_cache_miss(self):
         with tempfile.TemporaryDirectory() as d:
@@ -131,7 +135,9 @@ class TestBuildAlbumMembershipCached(unittest.TestCase):
             result = build_album_membership_cached(albums_dict, d, dry_run=False)
 
             album.__iter__.assert_called_once()
-            self.assertEqual(len(result), 3)
+            self.assertEqual(len(result.membership), 3)
+            # p2 and p3 are new (symmetric difference of {p1} and {p1,p2,p3})
+            self.assertEqual(result.changed_asset_ids, {"p2", "p3"})
 
             cache = _read_album_cache(d, "Vacation")
             self.assertEqual(cache["record_change_tag"], "new_tag")
@@ -143,7 +149,7 @@ class TestBuildAlbumMembershipCached(unittest.TestCase):
             albums_dict = {"2025/Nov/Trip": album}
             result = build_album_membership_cached(albums_dict, d, dry_run=False)
 
-            self.assertIn("p1", result)
+            self.assertIn("p1", result.membership)
             cache = _read_album_cache(d, "2025/Nov/Trip")
             self.assertEqual(cache["assets"], ["p1"])
 
@@ -153,7 +159,7 @@ class TestBuildAlbumMembershipCached(unittest.TestCase):
             albums_dict = {"Vacation": album}
             result = build_album_membership_cached(albums_dict, d, dry_run=True)
 
-            self.assertIn("p1", result)
+            self.assertIn("p1", result.membership)
             self.assertFalse(os.path.exists(os.path.join(d, CACHE_DIR)))
 
     def test_build_membership_smart_albums_skipped(self):
@@ -164,8 +170,8 @@ class TestBuildAlbumMembershipCached(unittest.TestCase):
             result = build_album_membership_cached(albums_dict, d, dry_run=False)
 
             smart.__iter__.assert_not_called()
-            self.assertNotIn("p1", result)
-            self.assertIn("p2", result)
+            self.assertNotIn("p1", result.membership)
+            self.assertIn("p2", result.membership)
 
             self.assertIsNone(_load_album_cache(d, "Favorites"))
 
@@ -182,7 +188,24 @@ class TestBuildAlbumMembershipCached(unittest.TestCase):
             result = build_album_membership_cached(albums_dict, d, dry_run=False)
 
             album.__iter__.assert_called_once()
-            self.assertIn("new_p", result)
+            self.assertIn("new_p", result.membership)
+            # old_p removed, new_p added
+            self.assertEqual(result.changed_asset_ids, {"old_p", "new_p"})
+
+    def test_build_membership_removed_asset_detected(self):
+        with tempfile.TemporaryDirectory() as d:
+            _write_album_cache(d, "Vacation", {
+                "uuid": "abc",
+                "record_change_tag": "old_tag",
+                "assets": ["p1", "p2", "p3"],
+            })
+
+            album = _make_album("Vacation", uuid="abc", record_change_tag="new_tag", photos=["p1", "p3"])
+            albums_dict = {"Vacation": album}
+            result = build_album_membership_cached(albums_dict, d, dry_run=False)
+
+            # p2 was removed
+            self.assertEqual(result.changed_asset_ids, {"p2"})
 
 
 if __name__ == "__main__":

@@ -7,6 +7,9 @@
 - feat: album membership written to XMP sidecar files as `dc:relation`
 - feat: album membership cache (`.albums/<name>.json`) for faster incremental runs
 - feat: `PhotoAsset.asset_id` property exposing CPLAsset UUID for consistent identity
+- feat: asset index (`.index/`) mapping asset UUIDs to file paths for cross-run lookups
+- feat: pre-loop XMP sidecar album update for photos not in `--recent` iteration window
+- feat: autodelete cleans up asset index entries
 
 ## 1.32.3 (2026-05-29)
 

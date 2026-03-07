@@ -16,6 +16,9 @@ from foundation import version_info
 
 exif_tool = None
 
+DC_NS = "http://purl.org/dc/elements/1.1/"
+RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+
 
 class XMPMetadata(NamedTuple):
     XMPToolkit: str
@@ -335,3 +338,86 @@ def generate_xml(metadata: XMPMetadata) -> ElementTree.Element:
         rdf.append(description_xmp)
 
     return xml_doc
+
+
+def update_xmp_albums(
+    logger: logging.Logger,
+    sidecar_path: str,
+    albums: list[tuple[str, str | None]] | None,
+    dry_run: bool,
+) -> bool:
+    """Update dc:relation in an existing XMP sidecar file.
+
+    Returns True if the file was modified (or would be in dry_run).
+    """
+    if not os.path.isfile(sidecar_path):
+        return False
+
+    try:
+        tree = ElementTree.parse(sidecar_path)
+    except ElementTree.ParseError as e:
+        logger.debug("Cannot parse XMP file %s: %s", sidecar_path, e)
+        return False
+
+    root = tree.getroot()
+    xmptk_value = root.attrib.get("{adobe:ns:meta/}xmptk", "")
+    from foundation.string_utils import startswith
+
+    if not startswith("icloudpd")(xmptk_value):
+        logger.debug("Skipping non-icloudpd XMP file %s", sidecar_path)
+        return False
+
+    # Find the rdf:RDF element
+    rdf = root.find(f"{{{RDF_NS}}}RDF")
+    if rdf is None:
+        return False
+
+    # Find dc:Description element (the one containing dc: namespace elements)
+    dc_desc = None
+    for desc in rdf.findall(f"{{{RDF_NS}}}Description"):
+        # Check if this Description contains any dc: elements
+        if desc.find(f"{{{DC_NS}}}identifier") is not None or desc.find(f"{{{DC_NS}}}relation") is not None or desc.find(f"{{{DC_NS}}}title") is not None or desc.find(f"{{{DC_NS}}}subject") is not None or desc.find(f"{{{DC_NS}}}description") is not None:
+            dc_desc = desc
+            break
+
+    if dc_desc is None:
+        if not albums:
+            return False
+        # Create a new dc:Description element
+        dc_desc = ElementTree.SubElement(
+            rdf,
+            f"{{{RDF_NS}}}Description",
+            {f"{{{RDF_NS}}}about": ""},
+        )
+
+    # Remove existing dc:relation
+    existing_relation = dc_desc.find(f"{{{DC_NS}}}relation")
+    if existing_relation is not None:
+        dc_desc.remove(existing_relation)
+
+    # Add new dc:relation if albums provided
+    if albums:
+        relation = ElementTree.SubElement(dc_desc, f"{{{DC_NS}}}relation")
+        bag = ElementTree.SubElement(relation, f"{{{RDF_NS}}}Bag")
+        for album_name, album_uuid in albums:
+            if album_uuid:
+                ElementTree.SubElement(bag, f"{{{RDF_NS}}}li").text = f"{album_name} ({album_uuid})"
+            else:
+                ElementTree.SubElement(bag, f"{{{RDF_NS}}}li").text = album_name
+
+    # Serialize and compare
+    new_content = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+    try:
+        with open(sidecar_path, "rb") as f:
+            old_content = f.read()
+    except OSError:
+        old_content = b""
+
+    if new_content == old_content:
+        return False
+
+    if not dry_run:
+        with open(sidecar_path, "wb") as f:
+            f.write(new_content)
+
+    return True

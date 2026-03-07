@@ -9,6 +9,7 @@ from typing import Callable, Sequence, Set
 
 from tzlocal import get_localzone
 
+from icloudpd.asset_index import remove_asset_entry
 from icloudpd.paths import local_download_path
 from pyicloud_ipd.asset_version import calculate_version_filename
 from pyicloud_ipd.raw_policy import RawTreatmentPolicy
@@ -114,3 +115,6 @@ def autodelete_photos(
                 logger.debug("Deleting %s...", path)
                 delete_local = delete_file_dry_run if dry_run else delete_file
                 delete_local(logger, path)
+
+        if not dry_run:
+            remove_asset_entry(directory, media.asset_id)

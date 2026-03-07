@@ -1,9 +1,13 @@
+import logging
+import os
+import tempfile
 from datetime import datetime
 from typing import Any, Dict
 from unittest import TestCase
+from xml.etree import ElementTree
 
 from foundation import version_info
-from icloudpd.xmp_sidecar import XMPMetadata, build_metadata, generate_xml
+from icloudpd.xmp_sidecar import XMPMetadata, build_metadata, generate_xml, update_xmp_albums
 
 
 class BuildXMPMetadata(TestCase):
@@ -203,3 +207,123 @@ class BuildXMPMetadata(TestCase):
         xml_str = ElementTree.tostring(xml_doc, encoding="unicode")
 
         assert "dc:relation" not in xml_str
+
+
+class TestUpdateXmpAlbums(TestCase):
+    def _write_xmp(self, path: str, albums: list[tuple[str, str | None]] | None = None) -> None:
+        metadata = XMPMetadata(
+            XMPToolkit="icloudpd test+abc123",
+            UUID="TEST-UUID",
+            Title=None,
+            Description=None,
+            Orientation=None,
+            Make=None,
+            DigitalSourceType=None,
+            Keywords=None,
+            GPSAltitude=None,
+            GPSLatitude=None,
+            GPSLongitude=None,
+            GPSSpeed=None,
+            GPSTimeStamp=None,
+            CreateDate=None,
+            Rating=None,
+            Albums=albums,
+        )
+        xml_doc = generate_xml(metadata)
+        with open(path, "wb") as f:
+            f.write(ElementTree.tostring(xml_doc, encoding="utf-8", xml_declaration=True))
+
+    def test_update_adds_albums(self) -> None:
+        logger = logging.getLogger("test")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "IMG_1234.JPG.xmp")
+            self._write_xmp(path)
+
+            result = update_xmp_albums(
+                logger, path, [("Vacation", "ABC-UUID"), ("Family", None)], dry_run=False
+            )
+            self.assertTrue(result)
+
+            with open(path, "r") as f:
+                content = f.read()
+            self.assertIn("Vacation (ABC-UUID)", content)
+            self.assertIn("Family", content)
+
+    def test_update_replaces_albums(self) -> None:
+        logger = logging.getLogger("test")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "IMG_1234.JPG.xmp")
+            self._write_xmp(path, albums=[("Old Album", "OLD-UUID")])
+
+            result = update_xmp_albums(
+                logger, path, [("New Album", "NEW-UUID")], dry_run=False
+            )
+            self.assertTrue(result)
+
+            with open(path, "r") as f:
+                content = f.read()
+            self.assertNotIn("Old Album", content)
+            self.assertIn("New Album (NEW-UUID)", content)
+
+    def test_update_removes_albums(self) -> None:
+        logger = logging.getLogger("test")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "IMG_1234.JPG.xmp")
+            self._write_xmp(path, albums=[("Old Album", "OLD-UUID")])
+
+            result = update_xmp_albums(logger, path, None, dry_run=False)
+            self.assertTrue(result)
+
+            with open(path, "r") as f:
+                content = f.read()
+            self.assertNotIn("Old Album", content)
+            self.assertNotIn("dc:relation", content)
+
+    def test_update_no_change(self) -> None:
+        logger = logging.getLogger("test")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "IMG_1234.JPG.xmp")
+            albums = [("Vacation", "ABC-UUID")]
+            self._write_xmp(path, albums=albums)
+
+            # First update to set consistent serialization
+            update_xmp_albums(logger, path, albums, dry_run=False)
+
+            result = update_xmp_albums(logger, path, albums, dry_run=False)
+            self.assertFalse(result)
+
+    def test_update_dry_run(self) -> None:
+        logger = logging.getLogger("test")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "IMG_1234.JPG.xmp")
+            self._write_xmp(path)
+            with open(path, "rb") as f:
+                original = f.read()
+
+            result = update_xmp_albums(
+                logger, path, [("New Album", "UUID")], dry_run=True
+            )
+            self.assertTrue(result)
+
+            with open(path, "rb") as f:
+                after = f.read()
+            self.assertEqual(original, after)
+
+    def test_update_nonexistent_file(self) -> None:
+        logger = logging.getLogger("test")
+        result = update_xmp_albums(logger, "/nonexistent/path.xmp", [("A", None)], dry_run=False)
+        self.assertFalse(result)
+
+    def test_update_non_icloudpd_file(self) -> None:
+        logger = logging.getLogger("test")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "IMG_1234.JPG.xmp")
+            # Write an XMP with a different toolkit
+            root = ElementTree.Element(
+                "x:xml_doc", {"xmlns:x": "adobe:ns:meta/", "x:xmptk": "Adobe Photoshop"}
+            )
+            with open(path, "wb") as f:
+                f.write(ElementTree.tostring(root, encoding="utf-8", xml_declaration=True))
+
+            result = update_xmp_albums(logger, path, [("A", None)], dry_run=False)
+            self.assertFalse(result)
