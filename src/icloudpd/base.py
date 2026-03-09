@@ -598,9 +598,10 @@ def download_builder(
         created_date = photo.created
 
     from foundation.core import compose
-    from foundation.string_utils import eq, lower
+    from foundation.string_utils import endswith, eq, lower
 
     is_none_folder = compose(eq("none"), lower)
+    is_jpeg = compose(endswith((".jpg", ".jpeg")), lower)
 
     if is_none_folder(folder_structure):
         date_path = ""
@@ -684,9 +685,25 @@ def download_builder(
                 file_size = os.stat(original_download_path or download_path).st_size
                 photo_size = version.size
                 if file_size != photo_size:
-                    download_path = (f"-{photo_size}.").join(download_path.rsplit(".", 1))
-                    logger.debug("%s deduplicated", truncate_middle(download_path, 96))
-                    file_exists = os.path.isfile(download_path)
+                    # Check if size difference is due to our own EXIF timestamp modification
+                    exif_dominated = False
+                    if set_exif_datetime and is_jpeg(filename):
+                        existing_exif = exif_datetime.get_photo_exif(
+                            logger, original_download_path or download_path
+                        )
+                        if existing_exif is not None:
+                            expected_date = created_date.strftime("%Y:%m:%d %H:%M:%S")
+                            exif_str = existing_exif.decode("utf-8") if isinstance(existing_exif, bytes) else existing_exif
+                            if exif_str == expected_date:
+                                exif_dominated = True
+                                logger.debug(
+                                    "%s size mismatch (%d vs %d) due to EXIF modification, skipping dedup",
+                                    truncate_middle(download_path, 96), file_size, photo_size,
+                                )
+                    if not exif_dominated:
+                        download_path = (f"-{photo_size}.").join(download_path.rsplit(".", 1))
+                        logger.debug("%s deduplicated", truncate_middle(download_path, 96))
+                        file_exists = os.path.isfile(download_path)
             if file_exists:
                 counter.increment()
                 logger.debug("%s already exists", truncate_middle(download_path, 96))
@@ -714,11 +731,6 @@ def download_builder(
                 success = download_result
 
                 if download_result:
-                    from foundation.core import compose
-                    from foundation.string_utils import endswith, lower
-
-                    is_jpeg = compose(endswith((".jpg", ".jpeg")), lower)
-
                     if (
                         not dry_run
                         and set_exif_datetime

@@ -1206,6 +1206,132 @@ class DownloadPhotoTestCase(TestCase):
 
             assert result.exit_code == 0
 
+    def test_dedup_skipped_when_exif_datetime_matches(self) -> None:
+        """Regression: EXIF timestamp insertion changes file size, causing false dedup downloads."""
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+
+        # IMG_7409.JPG exists with size 1 (differs from iCloud-reported 1884695),
+        # but has EXIF date matching photo's created_date — should NOT trigger dedup.
+        files_to_create = [
+            ("2018/07/31", "IMG_7409.JPG", 1),
+            ("2018/07/30", "IMG_7408.JPG", 1151066),
+            ("2018/07/30", "IMG_7408.MOV", 1606512),
+        ]
+
+        files_to_download: List[Tuple[str, str]] = []
+
+        def mock_get_photo_exif(
+            logger: logging.Logger, path: str
+        ) -> str | None:
+            if path.endswith("IMG_7409.JPG"):
+                # Return EXIF date matching the photo's created_date (2018-07-31T07:22:24Z)
+                # converted to local timezone in %Y:%m:%d %H:%M:%S format.
+                photo_created_utc = datetime.datetime(
+                    2018, 7, 31, 7, 22, 24, tzinfo=datetime.timezone.utc
+                )
+                from tzlocal import get_localzone
+
+                local_date = photo_created_utc.astimezone(get_localzone())
+                return local_date.strftime("%Y:%m:%d %H:%M:%S")
+            return None
+
+        with mock.patch(
+            "icloudpd.base.exif_datetime.get_photo_exif", side_effect=mock_get_photo_exif
+        ):
+            data_dir, result = run_icloudpd_test(
+                self.assertEqual,
+                self.root_path,
+                base_dir,
+                "listing_photos.yml",
+                files_to_create,
+                files_to_download,
+                [
+                    "--username",
+                    "jdoe@gmail.com",
+                    "--password",
+                    "password1",
+                    "--recent",
+                    "1",
+                    "--skip-videos",
+                    "--skip-live-photos",
+                    "--set-exif-datetime",
+                    "--no-progress-bar",
+                    "--threads-num",
+                    "1",
+                ],
+            )
+
+            # Should NOT see dedup for IMG_7409 — EXIF date matches
+            self.assertNotIn("deduplicated", result.output)
+            # Should see it treated as already existing
+            self.assertIn("IMG_7409.JPG already exists", result.output)
+            assert result.exit_code == 0
+
+    def test_dedup_still_triggers_when_exif_datetime_mismatches(self) -> None:
+        """Dedup should still trigger when EXIF date doesn't match created_date."""
+        base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
+
+        files_to_create = [
+            ("2018/07/31", "IMG_7409.JPG", 1),
+            ("2018/07/30", "IMG_7408.JPG", 1151066),
+            ("2018/07/30", "IMG_7408.MOV", 1606512),
+        ]
+
+        files_to_download = [
+            ("2018/07/31", "IMG_7409-1884695.JPG"),
+        ]
+
+        orig_download = PhotoAsset.download
+
+        def mocked_download(self: PhotoAsset, session: Any, _url: str, start: int) -> Response:
+            if not hasattr(PhotoAsset, "already_downloaded_exif_mismatch"):
+                response = orig_download(self, session, _url, start)
+                setattr(PhotoAsset, "already_downloaded_exif_mismatch", True)  # noqa: B010
+                return response
+            return mock.MagicMock()
+
+        def mock_get_photo_exif_wrong_date(
+            logger: logging.Logger, path: str
+        ) -> str | None:
+            if path.endswith("IMG_7409.JPG"):
+                # Return a wrong EXIF date — should still trigger dedup
+                return "2020:01:01 00:00:00"
+            return None
+
+        with (
+            mock.patch.object(PhotoAsset, "download", new=mocked_download),
+            mock.patch("icloudpd.base.exif_datetime.get_photo_exif", side_effect=mock_get_photo_exif_wrong_date),
+        ):
+            data_dir, result = run_icloudpd_test(
+                self.assertEqual,
+                self.root_path,
+                base_dir,
+                "listing_photos.yml",
+                files_to_create,
+                files_to_download,
+                [
+                    "--username",
+                    "jdoe@gmail.com",
+                    "--password",
+                    "password1",
+                    "--recent",
+                    "1",
+                    "--skip-videos",
+                    "--skip-live-photos",
+                    "--set-exif-datetime",
+                    "--no-progress-bar",
+                    "--threads-num",
+                    "1",
+                ],
+            )
+
+            # Should see dedup for IMG_7409 — EXIF date doesn't match
+            self.assertIn("IMG_7409-1884695.JPG deduplicated", result.output)
+            assert result.exit_code == 0
+
+        if hasattr(PhotoAsset, "already_downloaded_exif_mismatch"):
+            delattr(PhotoAsset, "already_downloaded_exif_mismatch")
+
     def test_download_photos_and_set_exif_exceptions(self) -> None:
         base_dir = os.path.join(self.fixtures_path, inspect.stack()[0][3])
 
