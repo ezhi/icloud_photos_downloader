@@ -24,15 +24,17 @@ def _make_album(name, uuid=None, record_change_tag=None, photos=None):
     return album
 
 
-def _write_album_cache(directory, album_name, data):
-    path = os.path.join(directory, CACHE_DIR, f"{album_name}.json")
+def _write_album_cache(directory, album_name, data, uuid=None):
+    suffix = f"_{uuid[:8]}" if uuid else ""
+    path = os.path.join(directory, CACHE_DIR, f"{album_name}{suffix}.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         json.dump(data, f)
 
 
-def _read_album_cache(directory, album_name):
-    path = os.path.join(directory, CACHE_DIR, f"{album_name}.json")
+def _read_album_cache(directory, album_name, uuid=None):
+    suffix = f"_{uuid[:8]}" if uuid else ""
+    path = os.path.join(directory, CACHE_DIR, f"{album_name}{suffix}.json")
     with open(path) as f:
         return json.load(f)
 
@@ -206,6 +208,42 @@ class TestBuildAlbumMembershipCached(unittest.TestCase):
 
             # p2 was removed
             self.assertEqual(result.changed_asset_ids, {"p2"})
+
+
+    def test_build_membership_case_collision_uses_uuid(self):
+        """Albums differing only in case get UUID-suffixed cache files."""
+        with tempfile.TemporaryDirectory() as d:
+            album_upper = _make_album("Sunset", uuid="uuid-AAA", record_change_tag="t1", photos=["p1"])
+            album_lower = _make_album("sunset", uuid="uuid-BBB", record_change_tag="t2", photos=["p2"])
+            albums_dict = {"Sunset": album_upper, "sunset": album_lower}
+            result = build_album_membership_cached(albums_dict, d, dry_run=False)
+
+            # Both albums cached correctly
+            self.assertEqual(result.membership["p1"], [("Sunset", "uuid-AAA")])
+            self.assertEqual(result.membership["p2"], [("sunset", "uuid-BBB")])
+
+            # UUID-suffixed cache files written
+            cache_a = _read_album_cache(d, "Sunset", uuid="uuid-AAA")
+            self.assertEqual(cache_a["assets"], ["p1"])
+            cache_b = _read_album_cache(d, "sunset", uuid="uuid-BBB")
+            self.assertEqual(cache_b["assets"], ["p2"])
+
+            # Cache hit on second run
+            result2 = build_album_membership_cached(albums_dict, d, dry_run=False)
+            self.assertEqual(result2.changed_asset_ids, set())
+
+    def test_build_membership_no_collision_no_uuid_suffix(self):
+        """Non-colliding albums use plain filenames (no UUID suffix)."""
+        with tempfile.TemporaryDirectory() as d:
+            album = _make_album("Vacation", uuid="abc", record_change_tag="t1", photos=["p1"])
+            albums_dict = {"Vacation": album}
+            build_album_membership_cached(albums_dict, d, dry_run=False)
+
+            # Plain filename, no UUID suffix
+            plain_path = os.path.join(d, CACHE_DIR, "Vacation.json")
+            self.assertTrue(os.path.exists(plain_path))
+            suffixed_path = os.path.join(d, CACHE_DIR, "Vacation_abc.json")
+            self.assertFalse(os.path.exists(suffixed_path))
 
 
 if __name__ == "__main__":

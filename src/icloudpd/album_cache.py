@@ -16,12 +16,13 @@ class AlbumMembershipResult(NamedTuple):
     changed_asset_ids: Set[str]
 
 
-def _album_cache_path(directory: str, album_name: str) -> str:
-    return os.path.join(directory, CACHE_DIR, f"{album_name}.json")
+def _album_cache_path(directory: str, album_name: str, uuid: str | None = None) -> str:
+    suffix = f"_{uuid[:8]}" if uuid else ""
+    return os.path.join(directory, CACHE_DIR, f"{album_name}{suffix}.json")
 
 
-def _load_album_cache(directory: str, album_name: str) -> Dict[str, Any] | None:
-    path = _album_cache_path(directory, album_name)
+def _load_album_cache(directory: str, album_name: str, uuid: str | None = None) -> Dict[str, Any] | None:
+    path = _album_cache_path(directory, album_name, uuid)
     try:
         with open(path, "r") as f:
             data = json.load(f)
@@ -32,8 +33,8 @@ def _load_album_cache(directory: str, album_name: str) -> Dict[str, Any] | None:
         return None
 
 
-def _save_album_cache(directory: str, album_name: str, data: Dict[str, Any]) -> None:
-    path = _album_cache_path(directory, album_name)
+def _save_album_cache(directory: str, album_name: str, data: Dict[str, Any], uuid: str | None = None) -> None:
+    path = _album_cache_path(directory, album_name, uuid)
     cache_dir = os.path.dirname(path)
     try:
         os.makedirs(cache_dir, exist_ok=True)
@@ -61,11 +62,21 @@ def build_album_membership_cached(
     changed_asset_ids: Set[str] = set()
     fetched_count = 0
 
+    # Detect case-insensitive collisions (e.g. macOS HFS+/APFS)
+    casefold_counts: Dict[str, int] = {}
+    for album_name in albums_dict:
+        key = album_name.casefold()
+        casefold_counts[key] = casefold_counts.get(key, 0) + 1
+    needs_disambiguation: Set[str] = {
+        name for name in albums_dict if casefold_counts[name.casefold()] > 1
+    }
+
     for album_name, album in albums_dict.items():
         if album.uuid is None:
             continue
 
-        cached_entry = _load_album_cache(directory, album_name)
+        uuid_for_path = album.uuid if album_name in needs_disambiguation else None
+        cached_entry = _load_album_cache(directory, album_name, uuid_for_path)
         if (
             cached_entry
             and cached_entry.get("uuid") == album.uuid
@@ -86,7 +97,7 @@ def build_album_membership_cached(
                     "uuid": album.uuid,
                     "record_change_tag": album.record_change_tag,
                     "assets": asset_ids,
-                })
+                }, uuid=uuid_for_path)
                 logger.debug("Album cache saved: %s (%d assets)", album_name, len(asset_ids))
 
         for asset_id in asset_ids:
