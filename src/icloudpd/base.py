@@ -40,7 +40,7 @@ from tzlocal import get_localzone
 from foundation.core import compose, identity, map_, partial_1_1
 from icloudpd import download, exif_datetime
 from icloudpd.album_cache import build_album_membership_cached
-from icloudpd.asset_index import add_asset_path, load_asset_entry
+from icloudpd.asset_index import add_asset_path, load_asset_entry_full, update_smart_albums
 from icloudpd.authentication import authenticator
 from icloudpd.autodelete import autodelete_photos
 from icloudpd.config import GlobalConfig, UserConfig
@@ -51,6 +51,7 @@ from icloudpd.log_level import LogLevel
 from icloudpd.mfa_provider import MFAProvider
 from icloudpd.password_provider import PasswordProvider
 from icloudpd.paths import local_download_path, remove_unicode_chars
+from icloudpd.smart_album_sync import SMART_ALBUM_FIELDS, build_smart_album_membership
 from icloudpd.server import serve_app
 from icloudpd.status import Status, StatusExchange
 from icloudpd.string_helpers import parse_timestamp_or_timedelta, truncate_middle
@@ -747,6 +748,15 @@ def download_builder(
                 albums=album_membership.get(photo.asset_id),
             )
 
+            # Detect and persist smart album membership from asset record fields
+            detected_smart: list[str] = []
+            asset_fields = photo._asset_record.get("fields", {})
+            for sa_name, (field_name, active_val) in SMART_ALBUM_FIELDS.items():
+                if field_name in asset_fields and asset_fields[field_name].get("value") == active_val:
+                    detected_smart.append(sa_name)
+            if detected_smart:
+                update_smart_albums(directory, photo.asset_id, detected_smart, dry_run)
+
     # Also download the live photo if present
     if not skip_live_photos:
         lp_size = live_photo_size
@@ -1002,21 +1012,34 @@ def core_single_run(
                     albums_dict = library_object.albums if need_albums_dict else {}
 
                     album_membership: Dict[str, List[Tuple[str, str | None]]] = {}
+                    all_changed_asset_ids: set[str] = set()
                     if user_config.xmp_sidecar:
                         album_result = build_album_membership_cached(
                             albums_dict, directory, user_config.dry_run,
                         )
                         album_membership = album_result.membership
+                        all_changed_asset_ids |= album_result.changed_asset_ids
+
+                        # Smart album sync (Favorites, Hidden)
+                        if not user_config.no_smart_albums:
+                            smart_result = build_smart_album_membership(
+                                library_object, directory, user_config.dry_run,
+                            )
+                            # Merge smart album membership into main membership
+                            for asset_id, smart_albums in smart_result.membership.items():
+                                album_membership.setdefault(asset_id, []).extend(smart_albums)
+                            all_changed_asset_ids |= smart_result.changed_asset_ids
 
                         # Pre-loop: update XMP sidecars for assets whose album membership changed
-                        if not global_config.only_print_filenames and album_result.changed_asset_ids:
+                        if not global_config.only_print_filenames and all_changed_asset_ids:
                             updated = 0
-                            for asset_id in album_result.changed_asset_ids:
-                                paths = load_asset_entry(directory, asset_id)
-                                if not paths:
+                            for asset_id in all_changed_asset_ids:
+                                entry = load_asset_entry_full(directory, asset_id)
+                                if not entry or not entry.get("paths"):
                                     continue
+                                # Combine user album + smart album membership for XMP
                                 albums_for_asset = album_membership.get(asset_id)
-                                for rel_path in paths:
+                                for rel_path in entry["paths"]:
                                     sidecar = os.path.join(directory, rel_path) + ".xmp"
                                     if os.path.isfile(sidecar) and update_xmp_albums(logger, sidecar, albums_for_asset, user_config.dry_run):
                                         updated += 1

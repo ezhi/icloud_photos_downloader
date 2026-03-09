@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- feat: smart album membership (Favorites, Hidden) tracked in XMP sidecars via CloudKit zone change tracking
+- feat: `--no-smart-albums` flag to disable smart album tracking
 - feat: add TRACE log level with HTTP request timing (`--log-level trace`)
 - feat: recursive subfolder traversal for iCloud album hierarchy
 - feat: album membership written to XMP sidecar files as `dc:relation`

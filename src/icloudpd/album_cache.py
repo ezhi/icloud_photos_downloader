@@ -25,7 +25,7 @@ def _load_album_cache(directory: str, album_name: str) -> Dict[str, Any] | None:
     try:
         with open(path, "r") as f:
             data = json.load(f)
-        if isinstance(data, dict) and "uuid" in data:
+        if isinstance(data, dict) and ("uuid" in data or data.get("smart")):
             return data
         return None
     except (OSError, json.JSONDecodeError, ValueError):

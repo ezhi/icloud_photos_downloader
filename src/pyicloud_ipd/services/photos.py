@@ -306,6 +306,49 @@ class PhotoLibrary:
                 ("Apple iCloud Photo Library has not finished indexing yet"), None
             )
 
+        self._sync_token: str | None = response.get("syncToken")
+
+    def fetch_zone_changes(
+        self, sync_token: str, desired_keys: list[str] | None = None
+    ) -> tuple[list[dict[str, Any]], str]:
+        """Fetch records changed since sync_token via the records/changes endpoint.
+
+        Returns (changed_records, new_sync_token). Paginates via moreComing.
+        """
+        if desired_keys is None:
+            desired_keys = ["isFavorite", "isHidden"]
+
+        url = f"{self.service_endpoint}/records/changes?{urlencode(self.params)}"
+        current_token = sync_token
+        all_records: list[dict[str, Any]] = []
+
+        while True:
+            payload = {
+                "zoneID": self.zone_id,
+                "syncToken": current_token,
+                "desiredKeys": desired_keys,
+                "resultsLimit": 500,
+            }
+            request = self.session.post(
+                url,
+                data=json.dumps(payload),
+                headers={"Content-type": "text/plain"},
+            )
+            response = request.json()
+
+            for rec in response.get("records", []):
+                all_records.append(rec)
+
+            current_token = response.get("syncToken", current_token)
+            if not response.get("moreComing", False):
+                break
+
+        return all_records, current_token
+
+    def get_sync_token(self) -> str | None:
+        """Return the sync token captured from the most recent query response."""
+        return self._sync_token
+
     @property
     def albums(self) -> Dict[str, "PhotoAlbum"]:
         albums = {
@@ -930,6 +973,54 @@ class PhotoAlbum:
             query["query"]["filterBy"].extend(query_filter)
 
         return query
+
+    def fetch_asset_ids(self) -> list[str]:
+        """Fetch only CPLAsset recordNames (asset UUIDs) without building PhotoAsset objects.
+
+        Uses desiredKeys: [] to minimize response payload — only record metadata is returned.
+        """
+        asset_ids: list[str] = []
+        if self.use_cursor_pagination:
+            continuation_marker: str | None = None
+            while True:
+                url = f"{self.service_endpoint}/records/query?{urlencode(self.params)}"
+                query = self._list_query_gen_cursor(
+                    continuation_marker, self.list_type, self.query_filter
+                )
+                query["desiredKeys"] = []
+                request = self.session.post(
+                    url,
+                    data=json.dumps(query),
+                    headers={"Content-type": "text/plain"},
+                )
+                response = request.json()
+                for rec in response.get("records", []):
+                    if rec.get("recordType") == "CPLAsset":
+                        asset_ids.append(rec["recordName"])
+                continuation_marker = response.get("continuationMarker")
+                if not continuation_marker:
+                    break
+        else:
+            offset = 0
+            while True:
+                url = f"{self.service_endpoint}/records/query?{urlencode(self.params)}"
+                query = self._list_query_gen(offset, self.list_type, self.query_filter)
+                query["desiredKeys"] = []
+                request = self.session.post(
+                    url,
+                    data=json.dumps(query),
+                    headers={"Content-type": "text/plain"},
+                )
+                response = request.json()
+                page_count = 0
+                for rec in response.get("records", []):
+                    if rec.get("recordType") == "CPLAsset":
+                        asset_ids.append(rec["recordName"])
+                        page_count += 1
+                if page_count == 0:
+                    break
+                offset += page_count
+        return asset_ids
 
     def __unicode__(self) -> str:
         return self.title

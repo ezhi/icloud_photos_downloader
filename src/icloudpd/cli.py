@@ -256,6 +256,12 @@ def add_options_for_user(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
         help="Don't download any photos (default: download all photos and videos)",
         action="store_true",
     )
+    cloned.add_argument(
+        "--no-smart-albums",
+        help="Disable tracking Favorites/Hidden smart album membership in XMP sidecars (default: enabled when --xmp-sidecar is on)",
+        action="store_true",
+        default=False,
+    )
     return cloned
 
 
@@ -485,6 +491,7 @@ def map_to_config(user_ns: argparse.Namespace) -> UserConfig:
         skip_created_before=user_ns.skip_created_before,
         skip_created_after=user_ns.skip_created_after,
         skip_photos=user_ns.skip_photos,
+        no_smart_albums=user_ns.no_smart_albums,
     )
 
 

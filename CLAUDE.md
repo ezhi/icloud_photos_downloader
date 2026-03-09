@@ -26,6 +26,7 @@ Entry point: `icloudpd` CLI -> `icloudpd.cli:cli()` -> `icloudpd.base.run_with_c
 | `src/icloudpd/asset_index.py` | Sharded asset_id → file paths index (`.index/`) |
 | `src/icloudpd/xmp_sidecar.py` | XMP sidecar generation and in-place album updates |
 | `src/icloudpd/authentication.py` | 2FA/2SA handling |
+| `src/icloudpd/smart_album_sync.py` | Smart album (Favorites/Hidden) membership via zone change tracking |
 | `src/icloudpd/autodelete.py` | Deletion strategies |
 | `src/icloudpd/log_level.py` | LogLevel enum, TRACE level (5) |
 | `src/pyicloud_ipd/base.py` | PyiCloudService (auth, session management) |
@@ -56,6 +57,18 @@ Entry point: `icloudpd` CLI -> `icloudpd.cli:cli()` -> `icloudpd.base.run_with_c
 - Pre-loop pass detects album changes and updates XMP `dc:relation` for non-iterated photos
 - Autodelete removes asset index entries when files are deleted
 
+### Smart album system
+
+- Favorites and Hidden tracked via CloudKit zone change tracking (`smart_album_sync.py`)
+- `PhotoLibrary._sync_token` captured from `CheckIndexingState` query response at init
+- First sync: full fetch via `PhotoAlbum.fetch_asset_ids()` (lightweight, `desiredKeys: []`)
+- Subsequent syncs: `PhotoLibrary.fetch_zone_changes(token)` returns only changed CPLAsset records
+- Token expiry: automatic fallback to full fetch
+- Sync state persisted in `.albums/.sync_state.json`
+- Smart album caches use `{"smart": true, "assets": [...]}` format in `.albums/<name>.json`
+- Asset index entries carry `smart_albums` field (e.g. `["Favorites"]`)
+- `--no-smart-albums` disables tracking (default: enabled when `--xmp-sidecar` is on)
+
 ## Development
 
 ### Setup
@@ -82,7 +95,7 @@ Alternatively run tests directly:
 
 ### Testing
 
-- 25 test files in `tests/`
+- 26 test files in `tests/`
 - Uses vcrpy for HTTP recording, pytest, freezegun for time mocking
 - 100% test coverage expected for new code
 - Test cassettes contain cached iCloud API responses (never use private photos)
