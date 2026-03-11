@@ -51,6 +51,7 @@ class _DefaultConfig:
     skip_created_after: datetime.datetime | datetime.timedelta | None
     skip_photos: bool
     no_smart_albums: bool
+    force_xmp_update: bool
 
 
 @dataclass(kw_only=True)

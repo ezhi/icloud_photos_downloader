@@ -119,6 +119,22 @@ def update_smart_albums(
     )
 
 
+def iter_all_asset_ids(directory: str) -> List[str]:
+    """Return all asset IDs present in the index."""
+    index_dir = os.path.join(directory, INDEX_DIR)
+    result: List[str] = []
+    if not os.path.isdir(index_dir):
+        return result
+    for shard in os.listdir(index_dir):
+        shard_dir = os.path.join(index_dir, shard)
+        if not os.path.isdir(shard_dir):
+            continue
+        for fname in os.listdir(shard_dir):
+            if fname.endswith(".json"):
+                result.append(fname[:-5])
+    return result
+
+
 def remove_asset_entry(directory: str, asset_id: str) -> None:
     path = index_entry_path(directory, asset_id)
     with contextlib.suppress(OSError):

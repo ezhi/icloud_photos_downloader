@@ -40,7 +40,7 @@ from tzlocal import get_localzone
 from foundation.core import compose, identity, map_, partial_1_1
 from icloudpd import download, exif_datetime
 from icloudpd.album_cache import build_album_membership_cached
-from icloudpd.asset_index import add_asset_path, load_asset_entry_full, update_smart_albums
+from icloudpd.asset_index import add_asset_path, iter_all_asset_ids, load_asset_entry_full, update_smart_albums
 from icloudpd.authentication import authenticator
 from icloudpd.autodelete import autodelete_photos
 from icloudpd.config import GlobalConfig, UserConfig
@@ -1043,9 +1043,15 @@ def core_single_run(
                             all_changed_asset_ids |= smart_result.changed_asset_ids
 
                         # Pre-loop: update XMP sidecars for assets whose album membership changed
-                        if not global_config.only_print_filenames and all_changed_asset_ids:
+                        # With --force-xmp-update, update ALL indexed assets
+                        asset_ids_to_update = (
+                            set(iter_all_asset_ids(directory))
+                            if user_config.force_xmp_update
+                            else all_changed_asset_ids
+                        )
+                        if not global_config.only_print_filenames and asset_ids_to_update:
                             updated = 0
-                            for asset_id in all_changed_asset_ids:
+                            for asset_id in asset_ids_to_update:
                                 entry = load_asset_entry_full(directory, asset_id)
                                 if not entry or not entry.get("paths"):
                                     continue

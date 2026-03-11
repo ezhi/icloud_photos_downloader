@@ -262,6 +262,12 @@ def add_options_for_user(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
         action="store_true",
         default=False,
     )
+    cloned.add_argument(
+        "--force-xmp-update",
+        help="Force update of all existing XMP sidecars with current album/favorites metadata",
+        action="store_true",
+        default=False,
+    )
     return cloned
 
 
@@ -492,6 +498,7 @@ def map_to_config(user_ns: argparse.Namespace) -> UserConfig:
         skip_created_after=user_ns.skip_created_after,
         skip_photos=user_ns.skip_photos,
         no_smart_albums=user_ns.no_smart_albums,
+        force_xmp_update=user_ns.force_xmp_update,
     )
 
 
