@@ -245,6 +245,7 @@ class CliTestCase(TestCase):
                         skip_created_after=None,
                         skip_photos=False,
                         no_smart_albums=False,
+                        force_xmp_update=False,
                     ),
                     UserConfig(
                         directory="def",
@@ -286,6 +287,7 @@ class CliTestCase(TestCase):
                         skip_created_after=None,
                         skip_photos=False,
                         no_smart_albums=False,
+                        force_xmp_update=False,
                     ),
                 ],
             ),
@@ -367,6 +369,7 @@ class CliTestCase(TestCase):
                         skip_created_after=datetime.timedelta(days=2),
                         skip_photos=False,
                         no_smart_albums=False,
+                        force_xmp_update=False,
                     ),
                 ],
             ),
