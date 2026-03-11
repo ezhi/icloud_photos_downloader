@@ -1050,8 +1050,12 @@ def core_single_run(
                             else all_changed_asset_ids
                         )
                         if not global_config.only_print_filenames and asset_ids_to_update:
+                            total = len(asset_ids_to_update)
+                            logger.info("Updating XMP sidecars for %d asset(s)...", total)
                             updated = 0
+                            processed = 0
                             for asset_id in asset_ids_to_update:
+                                processed += 1
                                 entry = load_asset_entry_full(directory, asset_id)
                                 if not entry or not entry.get("paths"):
                                     continue
@@ -1060,9 +1064,9 @@ def core_single_run(
                                 for rel_path in entry["paths"]:
                                     sidecar = os.path.join(directory, rel_path) + ".xmp"
                                     if os.path.isfile(sidecar) and update_xmp_albums(logger, sidecar, albums_for_asset, user_config.dry_run):
+                                        logger.debug("Updated %s", sidecar)
                                         updated += 1
-                            if updated:
-                                logger.info("Updated album metadata in %d sidecar(s)", updated)
+                            logger.info("Updated album metadata in %d of %d sidecar(s)", updated, total)
 
                     albums: Iterable[PhotoAlbum] = (
                         list(map_(albums_dict.__getitem__, user_config.albums))
