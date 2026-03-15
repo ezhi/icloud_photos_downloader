@@ -37,10 +37,15 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from tzlocal import get_localzone
 
-from foundation.core import compose, identity, map_, partial_1_1
+from foundation.core import compose, identity, map_
 from icloudpd import download, exif_datetime
 from icloudpd.album_cache import build_album_membership_cached
-from icloudpd.asset_index import add_asset_path, iter_all_asset_ids, load_asset_entry_full, update_smart_albums
+from icloudpd.asset_index import (
+    add_asset_path,
+    iter_all_asset_ids,
+    load_asset_entry_full,
+    update_smart_albums,
+)
 from icloudpd.authentication import authenticator
 from icloudpd.autodelete import autodelete_photos
 from icloudpd.config import GlobalConfig, UserConfig
@@ -51,10 +56,11 @@ from icloudpd.log_level import LogLevel
 from icloudpd.mfa_provider import MFAProvider
 from icloudpd.password_provider import PasswordProvider
 from icloudpd.paths import local_download_path, remove_unicode_chars
-from icloudpd.smart_album_sync import SMART_ALBUM_FIELDS, build_smart_album_membership
 from icloudpd.server import serve_app
+from icloudpd.smart_album_sync import SMART_ALBUM_FIELDS, build_smart_album_membership
 from icloudpd.status import Status, StatusExchange
 from icloudpd.string_helpers import parse_timestamp_or_timedelta, truncate_middle
+from icloudpd.watermark import get_watermark, save_watermark
 from icloudpd.xmp_sidecar import generate_xmp_file, update_xmp_albums
 from pyicloud_ipd.asset_version import add_suffix_to_filename, calculate_version_filename
 from pyicloud_ipd.base import PyiCloudService
@@ -108,7 +114,6 @@ def lp_filename_concatinator(filename: str) -> str:
     """Generate concatenator-style live photo filename, adding HEVC suffix for HEIC files"""
     import os
 
-    from foundation.core import compose
     from foundation.string_utils import endswith, lower
 
     name, ext = os.path.splitext(filename)
@@ -597,7 +602,6 @@ def download_builder(
         logger.error("Could not convert photo created date to local timezone (%s)", photo.created)
         created_date = photo.created
 
-    from foundation.core import compose
     from foundation.string_utils import endswith, eq, lower
 
     is_none_folder = compose(eq("none"), lower)
@@ -1139,11 +1143,34 @@ def core_single_run(
 
                         consecutive_files_found = Counter(0)
 
-                        def should_break(counter: Counter) -> bool:
-                            """Exit if until_found condition is reached"""
+                        # Load watermark to prevent --until-found from stopping
+                        # before reaching where the previous run left off.
+                        album_key = photo_album.name or ""
+                        watermark = (
+                            get_watermark(directory, album_key)
+                            if user_config.until_found is not None
+                            else None
+                        )
+                        past_watermark = [
+                            watermark is None or watermark.get("completed", False)
+                        ]
+                        if not past_watermark[0]:
+                            logger.debug(
+                                "Until-found watermark active: scanning past asset_date_ms=%s",
+                                watermark["asset_date_ms"],  # type: ignore[index]
+                            )
+                        last_processed_date_ms: int | None = None
+                        last_processed_id: str | None = None
+                        first_item_saved = False
+
+                        def should_break(
+                            counter: Counter, _wm: list[bool] = past_watermark,
+                        ) -> bool:
+                            """Exit if until_found condition is reached and past watermark"""
                             return (
                                 user_config.until_found is not None
                                 and counter.value() >= user_config.until_found
+                                and _wm[0]
                             )
 
                         status_exchange.get_progress().photos_count = (
@@ -1232,6 +1259,44 @@ def core_single_run(
                                 photos_counter += 1
                                 status_exchange.get_progress().photos_counter = photos_counter
 
+                                # Track watermark for --until-found crash recovery
+                                if user_config.until_found is not None:
+                                    try:
+                                        item_date_ms = int(
+                                            item._asset_record["fields"]["assetDate"]["value"]
+                                        )
+                                        last_processed_date_ms = item_date_ms
+                                        last_processed_id = item.id
+                                    except (KeyError, TypeError, ValueError):
+                                        pass
+
+                                    # Save watermark (incomplete) after first item
+                                    if not first_item_saved and last_processed_date_ms is not None:
+                                        first_item_saved = True
+                                        save_watermark(
+                                            directory, album_key,
+                                            last_processed_date_ms, last_processed_id or "",
+                                            completed=False,
+                                            dry_run=user_config.dry_run,
+                                        )
+
+                                    # Check if we've passed the watermark
+                                    if (
+                                        not past_watermark[0]
+                                        and watermark is not None
+                                        and item_date_ms <= watermark["asset_date_ms"]
+                                        and (
+                                            item_date_ms < watermark["asset_date_ms"]
+                                            or item.id == watermark.get("asset_id", "")
+                                        )
+                                    ):
+                                        past_watermark[0] = True
+                                        logger.debug(
+                                            "Reached until-found watermark at %s",
+                                            item.asset_date,
+                                        )
+                                        consecutive_files_found.reset()
+
                                 if status_exchange.get_progress().cancel:
                                     break
 
@@ -1242,6 +1307,19 @@ def core_single_run(
                             return 0
                         else:
                             pass
+
+                        # Save watermark with completion status
+                        if (
+                            user_config.until_found is not None
+                            and last_processed_date_ms is not None
+                        ):
+                            completed = not status_exchange.get_progress().cancel
+                            save_watermark(
+                                directory, album_key,
+                                last_processed_date_ms, last_processed_id or "",
+                                completed=completed,
+                                dry_run=user_config.dry_run,
+                            )
 
                         if status_exchange.get_progress().cancel:
                             logger.info("Iteration was cancelled")
