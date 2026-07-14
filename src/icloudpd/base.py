@@ -755,7 +755,10 @@ def download_builder(
                     if xmp_sidecar:
                         add_asset_path(directory, photo.asset_id, os.path.relpath(download_path, directory), dry_run)
 
-        if xmp_sidecar:
+        # Only write the sidecar / index when the media is actually on disk
+        # (already present or just downloaded). Without this, --only-print-filenames
+        # crashes on a missing asset whose date-folder doesn't exist yet.
+        if xmp_sidecar and os.path.isfile(download_path):
             generate_xmp_file(
                 logger,
                 download_path,
